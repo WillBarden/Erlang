@@ -4,7 +4,6 @@ FROM erlang:latest
 ADD apps apps
 ADD config config
 ADD rebar.config rebar.config
-ADD res res
 
 # Build
 RUN rebar3 release
