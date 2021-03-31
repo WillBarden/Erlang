@@ -14,4 +14,4 @@ RUN rm rebar.config
 
 EXPOSE 443
 EXPOSE 80
-CMD ["_build/default/rel/wbws/bin/wbws", "console"]
+CMD ["_build/default/rel/wbws/bin/wbws", "foreground"]
