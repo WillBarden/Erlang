@@ -1,0 +1,9 @@
+{application, wbws, [
+    {description, "Will's web server"},
+    {vsn, "0.1.0"},
+    {registered, []},
+    {mod, {wbws_app, []}},
+    {applications, [kernel, stdlib, jsone, epgsql, cowboy]},
+    {env,[]},
+    {modules, [wbws_app, wbws_sup, index_h]}
+]}.
