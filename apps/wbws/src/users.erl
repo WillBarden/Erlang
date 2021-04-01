@@ -6,10 +6,9 @@
 -export([valid_username/1, valid_password/1, get_last_auth_attempt/2, verify_token/2]).
 
 init(_Args) ->
-    Conn = db:connect(),
     HMACKey  = list_to_binary(os:getenv("HMAC_KEY")),
     SecSalt = list_to_binary(os:getenv("SEC_SALT")),
-    { ok, #{ conn => Conn, hmac_key => HMACKey, sec_salt => SecSalt }}.
+    { ok, #{ hmac_key => HMACKey, sec_salt => SecSalt }}.
 
 handle_call({ users_register, Username, InitPassword } = _Request, _From, State) -> 
     { reply, create({ Username, InitPassword }, State), State };
@@ -20,8 +19,7 @@ handle_call({ users_verify_token, Token } = _Request, _From, State) ->
 
 handle_cast(_Request, _State) -> { noreply, _State }.
 
-terminate(_Reason, #{ conn := Conn }) ->
-    epgsql:close(Conn),
+terminate(_Reason) ->
     normal.
 
 start_link() -> gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
@@ -29,7 +27,8 @@ start_link() -> gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 create({ Username, InitPassword }) when is_binary(Username), is_binary(InitPassword) ->
     gen_server:call(?MODULE, { users_register, Username, InitPassword }).
 
-create({ Username, InitPassword }, #{ conn := Conn, sec_salt := SecSalt }) ->
+create({ Username, InitPassword }, #{ sec_salt := SecSalt }) ->
+    Conn = db:connect(),
     UserID = get_user_id(Conn, Username),
     case UserID of
         null -> case valid_username(Username) of
@@ -55,7 +54,8 @@ create({ Username, InitPassword }, #{ conn := Conn, sec_salt := SecSalt }) ->
 authenticate({ Username, Password }) when is_binary(Username), is_binary(Password) ->
     gen_server:call(?MODULE, { users_auth, Username, Password }).
 
-authenticate({ Username, Password }, #{ conn := Conn, sec_salt := SecSalt, hmac_key := HMACKey }) ->
+authenticate({ Username, Password }, #{ sec_salt := SecSalt, hmac_key := HMACKey }) ->
+    Conn = db:connect(),
     case get_user_id(Conn, Username) of
         null -> { error, io_lib:format("No user exists with username \"~s\"~n", [Username]) };
         UserID ->
@@ -82,7 +82,8 @@ authenticate({ Username, Password }, #{ conn := Conn, sec_salt := SecSalt, hmac_
 verify({ Token }) when is_binary(Token) ->
     gen_server:call(?MODULE, { users_verify_token, Token }).
 
-verify({ Token }, #{ conn := Conn, hmac_key := HMACKey }) ->
+verify({ Token }, #{ hmac_key := HMACKey }) ->
+    Conn = db:connect(),
     case verify_token(HMACKey, Token) of
         TokenInfo when is_map(TokenInfo) ->
             % If the token expires within the next hour, refresh it
