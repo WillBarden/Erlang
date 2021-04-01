@@ -4,6 +4,7 @@
 
 handle_get(Req) ->
     io:fwrite("Getting registration page~n", []),
+    io:fwrite("Priv Dir: ~s~n", [code:priv_dir(wbws)]),
     ResPath = filename:join(code:priv_dir(wbws), "register.html"),
     case file:read_file(ResPath) of
         { ok, Data } -> cowboy_req:reply(200, #{}, Data, Req);
