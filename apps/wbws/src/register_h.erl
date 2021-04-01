@@ -5,6 +5,8 @@
 handle_get(Req) ->
     io:fwrite("Getting registration page~n", []),
     io:fwrite("Priv Dir: ~s~n", [code:priv_dir(wbws)]),
+    Results = epgsql:equery(db:connect(), "select id from users where username = $1", ["myusername"]),
+    io:write(Results),
     ResPath = filename:join(code:priv_dir(wbws), "register.html"),
     case file:read_file(ResPath) of
         { ok, Data } -> cowboy_req:reply(200, #{}, Data, Req);
