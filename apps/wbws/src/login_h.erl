@@ -15,10 +15,10 @@ handle_post(Req) ->
     { _, Password } = lists:keyfind(<<"password">>, 1, Body),
 
     case users:authenticate({ Username, Password }) of
-        AuthToken ->
+        AuthToken when is_binary(AuthToken) ->
             Req1 = cowboy_req:set_resp_cookie(<<"AUTH_TOKEN">>, AuthToken, Req),
             cowboy_req:reply(302, #{ "Location" => "/home" }, Req1);
-        { error, Error } -> cowboy_req:reply(401, Req)
+        { error, _Error } -> cowboy_req:reply(401, Req)
     end.
 
 
