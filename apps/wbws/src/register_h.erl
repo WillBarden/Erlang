@@ -3,6 +3,7 @@
 -export([init/2]).
 
 handle_get(Req) ->
+    io:fwrite("Getting registration page~n", []),
     ResPath = filename:join(code:priv_dir(wbws), "register.html"),
     case file:read_file(ResPath) of
         { ok, Data } -> cowboy_req:reply(200, #{}, Data, Req);
@@ -10,6 +11,7 @@ handle_get(Req) ->
     end.
 
 handle_post(Req) ->
+    io:fwrite("Posting new user if~n", []),
     { ok, Body, _ } = cowboy_req:read_urlencoded_body(Req),
     { _, Username } = lists:keyfind(<<"username">>, 1, Body),
     { _, Password } = lists:keyfind(<<"password">>, 1, Body),
@@ -20,7 +22,9 @@ handle_post(Req) ->
             cowboy_req:reply(400, #{}, #{ "error" => ErrorMsg }, Req)
     end.
 
-handle_unsupp_method(Req) -> cowboy_req:reply(405, Req).
+handle_unsupp_method(Req) ->
+    io:fwrite("Unsupported verb for registration~n", []),
+    cowboy_req:reply(405, Req).
 
 init(Req, State) ->
     case cowboy_req:method(Req) of
