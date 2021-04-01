@@ -57,7 +57,8 @@ authenticate({ Username, Password }) when is_binary(Username), is_binary(Passwor
 
 authenticate({ Username, Password }, #{ conn := Conn, sec_salt := SecSalt, hmac_key := HMACKey }) ->
     case get_user_id(Conn, Username) of
-        UserID when is_binary(UserID) ->
+        null -> { error, io_lib:format("No user exists with username \"~s\"~n", [Username]) };
+        UserID ->
             % Make sure a user can't login more than once every 5 seconds
             Now = calendar:datetime_to_gregorian_seconds(calendar:universal_time()),
             AuthLimitMet = case get_last_auth_attempt(Conn, UserID) of
@@ -75,8 +76,7 @@ authenticate({ Username, Password }, #{ conn := Conn, sec_salt := SecSalt, hmac_
                             { error, io_lib:format("Invalid password for user \"~s\"~n", [Username]) }
                     end;
                 true -> { error, "Too many authentication attempts, try again later" }
-            end;
-        null -> { error, io_lib:format("No user exists with username \"~s\"~n", [Username]) }
+            end
     end.
 
 verify({ Token }) when is_binary(Token) ->
