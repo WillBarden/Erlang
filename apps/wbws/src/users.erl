@@ -7,8 +7,8 @@
 
 init(_Args) ->
     Conn = db:connect(),
-    { ok, HMACKey}  = file:read_file(os:getenv("HMAC_KEY")),
-    { ok, SecSalt } = file:read_file(os:getenv("SEC_SALT")),
+    { ok, HMACKey}  = list_to_binary(os:getenv("HMAC_KEY")),
+    { ok, SecSalt } = list_to_binary(os:getenv("SEC_SALT")),
     { ok, #{ conn => Conn, hmac_key => HMACKey, sec_salt => SecSalt }}.
 
 handle_call({ users_register, Username, InitPassword } = _Request, _From, State) -> 

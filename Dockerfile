@@ -16,6 +16,4 @@ RUN rm rebar.config
 # USER wbws
 EXPOSE 80
 
-ADD secrets ${HOME}
-
 CMD ["_build/default/rel/wbws/bin/wbws", "foreground"]
