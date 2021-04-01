@@ -12,7 +12,8 @@ start(_StartType, _StartArgs) ->
                 {"/", index_h, []},
                 {"/register", register_h, []},
                 {"/login", login_h, []},
-                {"/home", cowboy_static, {priv_file, wbws, "home.html"}}
+                {"/home", cowboy_static, {priv_file, wbws, "home.html"}},
+                {"/[...]", cowboy_static, {priv_dir, wbws, "/static"}}
             ]
         }
     ]),
