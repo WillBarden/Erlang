@@ -9,8 +9,8 @@ ADD rebar.config rebar.config
 RUN rebar3 release
 
 # Remove unnecessary files
-RUN rm -rf apps
-RUN rm rebar.config
+# RUN rm -rf apps
+# RUN rm rebar.config
 
 # RUN useradd wbws
 # USER wbws
