@@ -9,16 +9,17 @@ start(_StartType, _StartArgs) ->
         {
             '_',
             [
-                {"/", index_h, []}
+                {"/", index_h, []},
+                {"/register", register_h, []},
+                {"/login", login_h, []},
+                {"/home", cowboy_static, {priv_file, wbws, "home.html"}}
             ]
         }
     ]),
-    case string:uppercase(os:getenv("PROD", "FALSE")) of
-        "TRUE" -> noop;
-        _ -> cowboy:start_clear(wbws, [{port, 80}], #{
-            env => #{dispatch => Dispatch}
-        })
-    end,
+    Port = list_to_integer(string:trim(os:getenv("PORT", "80"))),
+    cowboy:start_clear(wbws, [{port, Port}], #{
+        env => #{dispatch => Dispatch}
+    }),
     wbws_sup:start_link().
 
 stop(_State) ->

@@ -12,6 +12,10 @@ RUN rebar3 release
 RUN rm -rf apps
 RUN rm rebar.config
 
-EXPOSE 443
+# RUN useradd wbws
+# USER wbws
 EXPOSE 80
+
+ADD secrets ${HOME}
+
 CMD ["_build/default/rel/wbws/bin/wbws", "foreground"]

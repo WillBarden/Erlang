@@ -5,5 +5,5 @@
     {mod, {wbws_app, []}},
     {applications, [kernel, stdlib, jsone, epgsql, cowboy]},
     {env,[]},
-    {modules, [wbws_app, wbws_sup, index_h]}
+    {modules, [wbws_app, wbws_sup, index_h, users]}
 ]}.

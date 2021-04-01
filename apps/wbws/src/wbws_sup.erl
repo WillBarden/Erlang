@@ -17,5 +17,7 @@ init([]) ->
         intensity => 1,
         period => 20
     },
-    ChildSpecs = [],
+    ChildSpecs = [
+        #{ id => users, start => {users, start_link, []} }    
+    ],
     {ok, {SupFlags, ChildSpecs}}.
