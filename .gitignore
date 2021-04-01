@@ -18,4 +18,5 @@ _build
 rebar3.crashdump
 *~
 secrets/
+local-up.sh
 *.env
