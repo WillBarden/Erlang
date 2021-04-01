@@ -19,7 +19,7 @@ handle_call({ users_verify_token, Token } = _Request, _From, State) ->
 
 handle_cast(_Request, _State) -> { noreply, _State }.
 
-terminate(_Reason) ->
+terminate(_Reason, _State) ->
     normal.
 
 start_link() -> gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
