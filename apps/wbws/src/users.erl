@@ -6,8 +6,8 @@
 -export([valid_username/1, valid_password/1, get_last_auth_attempt/2, verify_token/2]).
 
 init(_Args) ->
-    HMACKey  = list_to_binary(os:getenv("HMAC_KEY")),
-    SecSalt = list_to_binary(os:getenv("SEC_SALT")),
+    HMACKey  = unicode:characters_to_binary(os:getenv("HMAC_KEY")),
+    SecSalt = unicode:characters_to_binary(os:getenv("SEC_SALT")),
     { ok, #{ hmac_key => HMACKey, sec_salt => SecSalt }}.
 
 handle_call({ users_register, Username, InitPassword } = _Request, _From, State) -> 
@@ -63,7 +63,9 @@ authenticate({ Username, Password }, #{ sec_salt := SecSalt, hmac_key := HMACKey
             Now = calendar:datetime_to_gregorian_seconds(calendar:universal_time()),
             AuthLimitMet = case get_last_auth_attempt(Conn, UserID) of
                 null -> false;
-                LastAuthAttempt -> Now < (calendar:datetime_to_gregorian_seconds(LastAuthAttempt) + 5)
+                LastAuthAttempt ->
+                    { { Yr, Mn, Dy }, { Hr, Min, Sec } } = LastAuthAttempt,
+                    Now < (calendar:datetime_to_gregorian_seconds({ { Yr, Mn, Dy }, { Hr, Min, round(Sec) } }) + 5)
             end,
             if
                 not AuthLimitMet ->

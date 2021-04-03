@@ -17,7 +17,7 @@ handle_post(Req) ->
     case users:authenticate({ Username, Password }) of
         { error, _Error } -> cowboy_req:reply(401, Req);
         AuthToken ->
-            Req1 = cowboy_req:set_resp_cookie(<<"AUTH_TOKEN">>, AuthToken, Req),
+            Req1 = cowboy_req:set_resp_cookie(<<"AUTH_TOKEN">>, AuthToken, Req, #{ max_age => 60 * 60 * 24, http_only => true }),
             cowboy_req:reply(302, #{ "Location" => "/home" }, Req1)
     end.
 
@@ -32,9 +32,10 @@ handle_post(Req) ->
 handle_unsupp_method(Req) -> cowboy_req:reply(405, Req).
 
 init(Req, State) ->
-    case cowboy_req:method(Req) of
-        <<"GET">> -> handle_get(Req);
-        <<"POST">> -> handle_post(Req);
-        _ -> handle_unsupp_method(Req)
+    Req1 = cowboy_req:set_resp_cookie(<<"AUTH_TOKEN">>, <<>>, Req, #{ max_age => 0, http_only => true }),
+    case cowboy_req:method(Req1) of
+        <<"GET">> -> handle_get(Req1);
+        <<"POST">> -> handle_post(Req1);
+        _ -> handle_unsupp_method(Req1)
     end,
-    { ok, Req, State }.
+    { ok, Req1, State }.
