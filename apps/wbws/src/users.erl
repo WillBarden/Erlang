@@ -2,7 +2,7 @@
 -behaviour(gen_server).
 
 -export([init/1, handle_call/3, handle_cast/2, terminate/2]).
--export([start_link/0, create/1, authenticate/1, verify/1]).
+-export([start_link/0, create/1, authenticate/1, verify/1, token_info/1]).
 -export([valid_username/1, valid_password/1, get_last_auth_attempt/2, verify_token/2]).
 
 init(_Args) ->
@@ -15,7 +15,9 @@ handle_call({ users_register, Username, InitPassword } = _Request, _From, State)
 handle_call({ users_auth, Username, Password } = _Request, _From, State) -> 
     { reply, authenticate({ Username, Password }, State), State };
 handle_call({ users_verify_token, Token } = _Request, _From, State) -> 
-    { reply, verify({ Token }, State), State }.
+    { reply, verify({ Token }, State), State };
+handle_call({ users_token_info, Token } = _Request, _From, State) -> 
+    { reply, token_info({ Token }, State), State }.
 
 handle_cast(_Request, _State) -> { noreply, _State }.
 
@@ -99,6 +101,11 @@ verify({ Token }, #{ hmac_key := HMACKey }) ->
             end;
         { error, Error } -> { error, Error }
     end.
+
+token_info({ Token }) when is_binary(Token) ->
+    gen_server:call(?MODULE, { users_token_info, Token }).
+
+token_info({ Token }, _State) -> get_token_info(Token).
 
 get_user_id(Conn, Username) ->
     case epgsql:equery(Conn, "select id from users where username = $1", [Username]) of
@@ -213,6 +220,12 @@ verify_token(HMACKey, Token) ->
             end;
         true -> { error, "Invalid signature" }
     end.
+
+get_token_info(null) -> null;
+get_token_info(AuthToken) ->
+    Body = jsone:decode(base64:decode(hd(string:split(unicode:characters_to_list(AuthToken), ".")))),
+    #{ <<"user_id">> := UserID, <<"username">> := Username, <<"exp">> := ExpTime } = Body,
+    #{ user_id => UserID, username => Username, exp => calendar:gregorian_seconds_to_datetime(ExpTime) }.
 
 valid_username(Username) ->
     case unicode:characters_to_list(Username) of

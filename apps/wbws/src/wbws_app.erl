@@ -15,6 +15,7 @@ start(_StartType, _StartArgs) ->
                 {"/logout", logout_h, []},
                 {"/cookies", cookies_h, []},
                 {"/home", cowboy_static, {priv_file, wbws, "home.html"}},
+                {"/auth", auth_h, []},
                 {"/[...]", cowboy_static, {priv_dir, wbws, "/static"}}
             ]
         }

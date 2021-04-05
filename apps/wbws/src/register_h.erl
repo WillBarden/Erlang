@@ -2,41 +2,31 @@
 
 -export([init/2]).
 
-handle_get(Req) ->
-    ResPath = filename:join(code:priv_dir(wbws), "register.html"),
-    case file:read_file(ResPath) of
-        { ok, Data } -> cowboy_req:reply(200, #{}, Data, Req);
-        { error, _ } -> cowboy_req:reply(404, Req)
+first_missing(Required, Values) ->
+    case lists:search(
+        fun(RequiredValue) -> not lists:member(RequiredValue, Values) end,
+        Required    
+    ) of
+        { value, Value } -> Value;
+        false -> null    
     end.
 
-handle_post(Req) ->
-    { ok, Body, _ } = cowboy_req:read_urlencoded_body(Req),
-    { _, Username } = lists:keyfind(<<"username">>, 1, Body),
-    { _, Password } = lists:keyfind(<<"password">>, 1, Body),
-    case users:create({ Username, Password }) of
-        ok -> cowboy_req:reply(302, #{ "Location" => "/login" }, Req);
-        { error, Error } ->
-            cowboy_req:reply(400, #{}, jsone:encode(#{ <<"error">> => unicode:characters_to_binary(Error) }), Req)
-    end.
+handle(<<"POST">>, Req) ->
+    { ok, RequestFields, Req1 } = cowboy_req:read_urlencoded_body(Req),
+    RequiredFieldNames = [<<"username">>, <<"password">>],
+    MissingField = first_missing(RequiredFieldNames, lists:map(fun(Field) -> element(1, Field) end, RequestFields)),
+    case MissingField of
+        null ->
+            { _, Username } = lists:keyfind(<<"username">>, 1, RequestFields),
+            { _, Password } = lists:keyfind(<<"password">>, 1, RequestFields),
+            case users:create({ Username, Password }) of
+                { error, Error } -> req:bad_req(Error, Req1);
+                ok -> req:created(Req1)
+            end;
+        MissingFieldName -> 
+            ErrorMsg = io_lib:format("Missing required field \"~s\"", [MissingFieldName]),
+            req:bad_req_error(ErrorMsg, Req1)
+    end;
+handle(_, Req) -> req:method_not_allowed(Req).
 
-handle_unsupp_method(Req) ->
-    cowboy_req:reply(405, Req).
-
-
-clear_cookie(Req, Cookie) when is_binary(Cookie) ->
-    cowboy_req:set_resp_cookie(Cookie, <<>>, Req, #{ max_age => 0 }).
-
-init(Req, State) ->
-    % Cookies = cowboy_req:parse_cookies(Req),
-    io:fwrite("Incoming Cookie Example Value: ~p~n", [cowboy_req:parse_cookies(Req)]),
-    % Req1 = cowboy_req:set_resp_cookie(<<"asdf">>, <<"New Example Value">>, Req),
-    Req1 = clear_cookie(Req, <<"asdf">>),
-    Req2 = cowboy_req:reply(200, #{}, jsone:encode(#{ <<"message">> => "Success!" }), Req1),
-    { ok, Req2, State }.
-    % Req1 = cowboy_req:set_resp_cookie(<<"AUTH_TOKEN">>, <<>>, Req, #{ max_age => 0, http_only => true }),
-    % case cowboy_req:method(Req1) of
-    %     <<"GET">> -> handle_get(Req1);
-    %     <<"POST">> -> handle_post(Req1);
-    %     _ -> handle_unsupp_method(Req1)
-    % end,
-    % { ok, Req1, State }.
+init(Req, State) -> { ok, req:reply(handle(cowboy_req:method(Req), Req)), State }.
