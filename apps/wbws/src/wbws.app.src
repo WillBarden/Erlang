@@ -3,7 +3,6 @@
     {vsn, "0.1.0"},
     {registered, []},
     {mod, {wbws_app, []}},
-    {applications, [kernel, stdlib, jsone, epgsql, cowboy]},
-    {env,[]},
+    {applications, [kernel, stdlib, jsone, epgsql, poolboy, cowboy]},
     {modules, [wbws_app, wbws_sup, index_h, users]}
 ]}.

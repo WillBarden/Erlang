@@ -9,20 +9,19 @@ start(_StartType, _StartArgs) ->
         {
             '_',
             [
-                {"/", index_h, []},
-                {"/register", register_h, []},
-                {"/login", login_h, []},
-                {"/logout", logout_h, []},
-                {"/cookies", cookies_h, []},
-                {"/home", cowboy_static, {priv_file, wbws, "home.html"}},
-                {"/auth", auth_h, []},
-                {"/[...]", cowboy_static, {priv_dir, wbws, "/static"}}
+                % { "/login", login_h, { unprotected, [] } },
+                % { "/logout", logout_h, { unprotected, [] } },
+                { "/", index_h, { unprotected, [] } },
+                { "/register", register_h, { unprotected, [] } },
+                { "/auth", auth_h, { unprotected, [] } },
+                { "/[...]", cowboy_static, { unprotected, { priv_dir, wbws, "/static" } } }
             ]
         }
     ]),
     Port = list_to_integer(string:trim(os:getenv("PORT", "80"))),
     cowboy:start_clear(wbws, [{port, Port}], #{
-        env => #{dispatch => Dispatch}
+        env => #{dispatch => Dispatch},
+        middlewares => [cowboy_router, auth_m, cowboy_handler]
     }),
     wbws_sup:start_link().
 

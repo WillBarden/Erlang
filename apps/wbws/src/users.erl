@@ -8,7 +8,11 @@
 init(_Args) ->
     HMACKey  = unicode:characters_to_binary(os:getenv("HMAC_KEY")),
     SecSalt = unicode:characters_to_binary(os:getenv("SEC_SALT")),
-    { ok, #{ hmac_key => HMACKey, sec_salt => SecSalt }}.
+    Conn = case db:connect() of
+        C when is_pid(C) -> C;
+        _ -> null
+    end,
+    { ok, #{ hmac_key => HMACKey, sec_salt => SecSalt, db_conn => Conn }}.
 
 handle_call({ users_register, Username, InitPassword } = _Request, _From, State) -> 
     { reply, create({ Username, InitPassword }, State), State };

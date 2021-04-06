@@ -32,3 +32,16 @@ create table password_changes (
     at timestamptz not null default now(),
     foreign key(user_id) references users(id)
 );
+
+create table permissions (
+    name varchar(64) not null,
+    primary key(name)
+);
+insert into permissions values ('ADMIN');
+
+create table permission_assignments (
+    user_id uuid not null,
+    permission varchar(64) not null,
+    foreign key(user_id) references users(id),
+    foreign key(permission) references permissions(name)
+);
