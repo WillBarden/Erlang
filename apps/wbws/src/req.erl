@@ -2,6 +2,10 @@
 
 -compile(export_all).
 
+read_urlencoded_body(Req) -> cowboy_req:read_urlencoded_body(Req).
+
+method(Req) -> cowboy_req:method(Req).
+
 get_cookie(Key, Req) when is_list(Key) ->
     get_cookie(unicode:characters_to_binary(Key), Req);
 get_cookie(Key, Req) ->
@@ -16,67 +20,85 @@ set_cookie(Key, Value, Req) when is_list(Key) ->
 set_cookie(Key, Value, Req) when is_list(Value) ->
     set_cookie(Key, unicode:characters_to_binary(Value), Req);
 set_cookie(Key, Value, Req) ->
-    cowboy_req:set_resp_cookie(
-        unicode:characters_to_binary(Key), 
-        unicode:characters_to_binary(Value), 
-        Req,
-        #{ max_age => (60 * 60 * 24), http_only => true }
-    ).
+    SecondsInDay = 60 * 60 * 24,
+    cowboy_req:set_resp_cookie(Key, Value, Req, #{ max_age => SecondsInDay, http_only => true }).
 
 clear_cookie(Key, Req) when is_list(Key) ->
     clear_cookie(unicode:characters_to_binary(Key), Req);
 clear_cookie(Key, Req) ->
-    cowboy_req:set_resp_cookie(
-        unicode:characters_to_binary(Key),
-        <<>>, 
-        Req,
-        #{ max_age => 0, http_only => true }
-    ).
+    cowboy_req:set_resp_cookie(Key, <<>>,  Req, #{ max_age => 0, http_only => true }).
 
-reply(ReplyTuple) ->
-    case ReplyTuple of
-        { Status, Req } -> cowboy_req:reply(Status, Req);
-        { Status, Body, Req } -> cowboy_req:reply(Status, #{}, Body, Req);
-        { Status, Body, Headers, Req } -> cowboy_req:reply(Status, Headers, Body, Req)
+authorize(Req) -> authorize(Req, []).
+
+authorize(Req, Permissions) ->
+    case get_cookie("AUTH_TOKEN", Req) of
+        null -> { unauthorized, Req };
+        AuthToken -> case auth_token:verify(AuthToken) of
+            no_auth_info ->
+                Req1 = clear_cookie("AUTH_TOKEN", Req),
+                { unauthorized, Req1 };
+            expired ->
+                Req1 = clear_cookie("AUTH_TOKEN", Req),
+                { unauthorized, Req1 };
+            invalid_signature ->
+                Req1 = clear_cookie("AUTH_TOKEN", Req),
+                { unauthorized, Req1 };
+            { valid, { UserID, Username, UserPermissions, ExpTime } = AuthInfo } ->
+                case length(Permissions) of
+                    0 -> { authorized, Req };
+                    _ -> 
+                        NormalizedPermissions = lists:map(fun(P) -> etc:normalize_permission(P) end, Permissions),
+                        NormalizedUserPermissions = lists:map(
+                            fun(P) -> etc:normalize_permission(P) end, UserPermissions
+                        ),
+                        case lists:search(
+                            fun(P) -> lists:member(P, NormalizedPermissions) end, NormalizedUserPermissions
+                        ) of
+                            { value, _Permission } -> { authorized, Req };
+                            false ->
+                                Req1 = clear_cookie("AUTH_TOKEN", Req),
+                                { unauthorized, Req1 }
+                        end
+                end
+        end
     end.
 
 create_error_response(Error) -> #{ <<"error">> => unicode:characters_to_binary(Error) }.
 
-ok(Req) -> { 200, Req }.
-ok(Body, Req) -> { 200, Body, Req }.
-ok(Body, Headers, Req) -> { 200, Body, Headers, Req }.
-ok_json(Body, Req) -> { 200, jsone:encode(Body), Req }.
-ok_json(Body, Headers, Req) -> { 200, jsone:encode(Body), Headers, Req }.
+reply(Status, Req) -> cowboy_req:reply(Status, Req).
+reply(Status, Headers, Req) -> cowboy_req:reply(Status, Headers, Req).
+reply(Status, Headers, Body, Req) -> cowboy_req:reply(Status, Headers, Body, Req).
+reply_json(Status, Headers, Body, Req) ->
+    Headers1 = Headers#{ <<"content-type">> => <<"application/json">> },
+    reply(Status, Headers1, jsone:encode(Body), Req).
+reply_error(Status, Headers, Error, Req) ->
+    reply_json(Status, Headers, create_error_response(Error), Req).
 
-created(Req) -> { 201, Req }.
-created(Body, Req) -> { 201, Body, Req }.
-created(Body, Headers, Req) -> { 201, Body, Headers, Req }.
-created_json(Body, Req) -> { 201, jsone:encode(Body), Req }.
-created_json(Body, Headers, Req) -> { 201, jsone:encode(Body), Headers, Req }.
+ok(Req) -> reply(200, Req).
+ok(Headers, Req) -> reply(200, Headers, Req).
+ok(Headers, Body, Req) -> reply(200, Headers, Body, Req).
+ok_json(Headers, Body, Req) -> reply_json(200, Headers, Body, Req).
 
-accepted(Req) -> { 202, Req }.
-accepted(Body, Req) -> { 202, Body, Req }.
-accepted(Body, Headers, Req) -> { 202, Body, Headers, Req }.
-accepted_json(Body, Req) -> { 202, jsone:encode(Body), Req }.
-accepted_json(Body, Headers, Req) -> { 202, jsone:encode(Body), Headers, Req }.
+created(Req) -> reply(201, Req).
+created(Headers, Req) -> reply(201, Headers, Req).
+created(Headers, Body, Req) -> reply(201, Headers, Body, Req).
+created_json(Headers, Body, Req) -> reply_json(201, Headers, Body, Req).
 
-no_content(Req) -> { 204, Req }.
-no_content(Body, Req) -> { 204, Body, Req }.
-no_content(Body, Headers, Req) -> { 204, Body, Headers, Req }.
-no_content_json(Body, Req) -> { 204, jsone:encode(Body), Req }.
-no_content_json(Body, Headers, Req) -> { 204, jsone:encode(Body), Headers, Req }.
+accepted(Req) -> reply(202, Req).
+accepted(Headers, Req) -> reply(202, Headers, Req).
+accepted(Headers, Body, Req) -> reply(202, Headers, Body, Req).
 
-redirect(Location, Req) -> { 302, <<>>, #{ "Location" => Location }, Req }.
+no_content(Req) -> reply(204, Req).
+no_content(Headers, Req) -> reply(204, Headers, Req).
+no_content(Headers, Body, Req) -> reply(204, Headers, Body, Req).
 
-bad_req(Req) -> { 400, Req }.
-bad_req(Body, Req) -> { 400, Body, Req }.
-bad_req(Body, Headers, Req) -> { 400, Body, Headers, Req }.
-bad_req_json(Body, Req) -> { 400, jsone:encode(Body), Req }.
-bad_req_json(Body, Headers, Req) -> { 400, jsone:encode(Body), Headers, Req }.
-bad_req_error(Error, Req) -> { 400, jsone:encode(create_error_response(Error)), Req }.
-bad_req_error(Error, Headers, Req) -> { 400, jsone:encode(create_error_response(Error)), Headers, Req }.
+bad_req(Req) -> reply(400, Req).
+bad_req(Headers, Req) -> reply(400, Headers, Req).
+bad_req(Headers, Body, Req) -> reply(400, Headers, Body, Req).
+bad_req_json(Headers, Body, Req) -> reply_json(400, Headers, Body, Req).
+bad_req_error(Headers, Error, Req) -> reply_error(400, Headers, Error, Req).
 
-unauthorized(Req) -> { 401, jsone:encode(create_error_response("Unauthorized")), Req }.
-forbidden(Req) -> { 403, jsone:encode(create_error_response("Forbidden")), Req }.
-not_found(Req) -> { 404, jsone:encode(create_error_response("Not Found")), Req }.
-method_not_allowed(Req) -> { 405, jsone:encode(create_error_response("Method Not Allowed")), Req }.
+unauthorized(Req) -> reply_error(401, #{}, "Anauthorized", Req).
+forbidden(Req) -> reply_error(403, #{}, "Forbidden", Req).
+not_found(Req) -> reply_error(404, #{}, "Not Found", Req).
+method_not_allowed(Req) -> reply_error(405, #{}, "Method Not Allowed", Req).

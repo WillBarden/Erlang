@@ -1,252 +1,154 @@
 -module(users).
 -behaviour(gen_server).
 
--export([init/1, handle_call/3, handle_cast/2, terminate/2]).
--export([start_link/0, create/1, authenticate/1, verify/1, token_info/1]).
--export([valid_username/1, valid_password/1, get_last_auth_attempt/2, verify_token/2]).
+-export([init/1, terminate/2, start_link/1, handle_call/3, handle_cast/2]).
+-export([id/1, create/1, authenticate/1, update_credentials/1]).
 
-init(_Args) ->
-    HMACKey  = unicode:characters_to_binary(os:getenv("HMAC_KEY")),
-    SecSalt = unicode:characters_to_binary(os:getenv("SEC_SALT")),
-    Conn = case db:connect() of
-        C when is_pid(C) -> C;
+
+init(Args) -> { ok, Args }.
+
+terminate(_Reason, _State) -> normal.
+
+start_link(Args) -> gen_server:start_link(?MODULE, Args, []).
+
+handle_call({ id, Username }, _From, State) ->
+    UserID = case db:equery("select id from users where username = $1", [Username]) of
+        { ok, _Columns, [{ ID }]} -> ID;
         _ -> null
     end,
-    { ok, #{ hmac_key => HMACKey, sec_salt => SecSalt, db_conn => Conn }}.
-
-handle_call({ users_register, Username, InitPassword } = _Request, _From, State) -> 
-    { reply, create({ Username, InitPassword }, State), State };
-handle_call({ users_auth, Username, Password } = _Request, _From, State) -> 
-    { reply, authenticate({ Username, Password }, State), State };
-handle_call({ users_verify_token, Token } = _Request, _From, State) -> 
-    { reply, verify({ Token }, State), State };
-handle_call({ users_token_info, Token } = _Request, _From, State) -> 
-    { reply, token_info({ Token }, State), State }.
+    { reply, UserID, State };
+handle_call({ create, Username, Password }, _From, #{ sec_salt := SecSalt } = State) ->
+    UsernameStr = unicode:characters_to_list(Username),
+    PasswordStr = unicode:characters_to_list(Password),
+    Reply = if
+        length(UsernameStr) < 3 orelse length(UsernameStr) > 64 ->
+            { invalid_username, "Username must be 3 to 64 characters long" };
+        length(PasswordStr) < 8 orelse length(UsernameStr) > 64 ->
+            { invalid_password, "Password must be 8 to 64 characters long" };
+        true -> case id(Username) of
+            ExistingID when is_binary(ExistingID) ->
+                { invalid_username, io_lib:format("Username ~s already exists", [Username]) };
+            null ->
+                db:transact(fun(Conn) ->
+                    { ok, _Count, _Columns, [{ UserID }] } = db:equery(
+                        "insert into users (username, created) values ($1, $2) returning (id)",
+                        [Username, calendar:universal_time()]
+                    ),
+                    Salt = crypto:strong_rand_bytes(64),
+                    Hash = crypto:hash(sha3_512, <<Salt/binary, SecSalt/binary, Password/binary>>),
+                    { ok, _Count } = db:equery(
+                        "insert into passwords (user_id, salt, hash) values ($1, $2, $3)",
+                        [UserID, base64:encode(Salt), base64:encode(Hash)]
+                    ),
+                    ok
+                end)
+        end
+    end,
+    { reply, Reply, State };
+handle_call({ authenticate, Username, Password }, _From, #{ sec_salt := SecSalt } = State) ->
+    Reply = case id(Username) of
+        null -> no_user;
+        UserID ->
+            { ok, _Columns, [{ LastAuthAttempt }] } = db:equery(
+                "select max(at) from auth_attempts where user_id = $1", [UserID]
+            ),
+            AuthLimitMet = case LastAuthAttempt of
+                null -> false;
+                AttemptTime -> % Now < (calendar:datetime_to_gregorian_seconds({ { Yr, Mn, Dy }, { Hr, Min, round(Sec) } }) + 5)
+                    Now = calendar:datetime_to_gregorian_seconds(calendar:universal_time()),
+                    Now < (calendar:datetime_to_gregorian_seconds(round_datetime(AttemptTime)) + 5)
+            end,
+            if
+                AuthLimitMet -> auth_limit_met;
+                not AuthLimitMet ->
+                    { ok, _, [{ Salt, Hash }] } = db:equery(
+                        "select salt, hash from passwords where user_id = $1", [UserID]
+                    ),
+                    ComputedHash = base64:encode(
+                        crypto:hash(sha3_512, <<(base64:decode(Salt))/binary, SecSalt/binary, Password/binary>>)
+                    ),
+                    db:equery(
+                        "insert into auth_attempts (user_id, successful, at) values ($1, $2, $3)",
+                        [UserID, ComputedHash =:= Hash, calendar:universal_time()]
+                    ),
+                    if
+                        ComputedHash =:= Hash -> { authenticated, auth_token:sign({ UserID, Username, [] }) };
+                        ComputedHash =/= Hash -> invalid_credentials
+                    end
+            end
+    end,
+    { reply, Reply, State };
+handle_call({ update_credentials, Username, Password, NewPassword }, _From, #{ sec_salt := SecSalt } = State) ->
+    Reply = case id(Username) of
+        null -> no_user;
+        UserID ->
+            { ok, _Columns, [{ LastChange }] } = db:equery(
+                "select max(at) from password_changes where user_id = $1", [UserID]
+            ),
+            ChangeLimitMet = case LastChange of
+                null -> false;
+                ChangeTime -> % Now < (calendar:datetime_to_gregorian_seconds({ { Yr, Mn, Dy }, { Hr, Min, round(Sec) } }) + 5)
+                    Now = calendar:datetime_to_gregorian_seconds(calendar:universal_time()),
+                    Now < (calendar:datetime_to_gregorian_seconds(round_datetime(ChangeTime)) + 60)
+            end,
+            if
+                ChangeLimitMet -> change_limit_met;
+                not ChangeLimitMet ->
+                    { ok, _, [{ Salt, Hash }] } = db:equery(
+                        "select salt, hash from passwords where user_id = $1", [UserID]
+                    ),
+                    ComputedHash = base64:encode(
+                        crypto:hash(sha3_512, <<(base64:decode(Salt))/binary, SecSalt/binary, Password/binary>>)
+                    ),
+                    if
+                        ComputedHash =:= Hash ->
+                            NewPasswordStr = unicode:characters_to_list(NewPassword),
+                            if
+                                length(NewPasswordStr) < 8 orelse length(NewPasswordStr) > 64 ->
+                                    { invalid_password, "Password must be 8 to 64 characters long" };
+                                true ->
+                                    NewSalt = crypto:strong_rand_bytes(64),
+                                    NewHash = crypto:hash(
+                                        sha3_512, <<NewSalt/binary, SecSalt/binary, NewPassword/binary>>
+                                    ),
+                                    db:transact(fun(Conn) ->
+                                        io:fwrite("Updating credentials, New Salt = ~s, New Hash = ~s ~n", [NewSalt, NewHash]),
+                                        db:equery(
+                                            Conn,
+                                            "update passwords set salt = $1, hash = $2 where user_id = $3",
+                                            [base64:encode(NewSalt), base64:encode(NewHash), UserID]
+                                        ),
+                                        io:fwrite("Recording password change event~n", []),
+                                        db:equery(
+                                            Conn,
+                                            "insert into password_changes (user_id, at) values ($1, $2)",
+                                            [UserID, calendar:universal_time()]
+                                        ),
+                                        io:fwrite("Finalizing transaction~n", []),
+                                        ok
+                                    end)
+                            end;
+                        ComputedHash =/= Hash -> invalid_credentials
+                    end
+            end
+    end,
+    { reply, Reply, State };
+handle_call(_Request, _From, State) -> { noreply, State }.
 
 handle_cast(_Request, _State) -> { noreply, _State }.
 
-terminate(_Reason, _State) ->
-    normal.
+call(Request) -> poolboy:transaction(users_worker_pool, fun(Worker) -> gen_server:call(Worker, Request) end).
 
-start_link() -> gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+cast(Request) -> poolboy:transaction(users_worker_pool, fun(Worker) -> gen_server:cast(Worker, Request) end).
 
-create({ Username, InitPassword }) when is_binary(Username), is_binary(InitPassword) ->
-    gen_server:call(?MODULE, { users_register, Username, InitPassword }).
+id(Username) when is_binary(Username) -> call({ id, Username }).
 
-create({ Username, InitPassword }, #{ sec_salt := SecSalt }) ->
-    Conn = db:connect(),
-    UserID = get_user_id(Conn, Username),
-    case UserID of
-        null -> case valid_username(Username) of
-            true -> case valid_password(InitPassword) of
-                true ->
-                    epgsql:with_transaction(
-                        Conn,
-                        fun(TConn) ->
-                            NewUserID = insert_user(TConn, Username),
-                            insert_password(TConn, NewUserID, InitPassword, SecSalt),
-                            insert_password_change(TConn, NewUserID),
-                            ok
-                        end,
-                        []
-                    );
-                { error, Error } -> { error, Error }
-            end;
-            { error, Error } -> { error, Error }
-        end;
-        _ -> { error, io_lib:format("Username ~s already exists", [Username]) }
-    end.
+create({ Username, Password }) -> call({ create, Username, Password }).
 
-authenticate({ Username, Password }) when is_binary(Username), is_binary(Password) ->
-    gen_server:call(?MODULE, { users_auth, Username, Password }).
+authenticate({ Username, Password }) -> call({ authenticate, Username, Password }).
 
-authenticate({ Username, Password }, #{ sec_salt := SecSalt, hmac_key := HMACKey }) ->
-    Conn = db:connect(),
-    case get_user_id(Conn, Username) of
-        null -> { error, io_lib:format("No user exists with username \"~s\"~n", [Username]) };
-        UserID ->
-            % Make sure a user can't login more than once every 5 seconds
-            Now = calendar:datetime_to_gregorian_seconds(calendar:universal_time()),
-            AuthLimitMet = case get_last_auth_attempt(Conn, UserID) of
-                null -> false;
-                LastAuthAttempt ->
-                    { { Yr, Mn, Dy }, { Hr, Min, Sec } } = LastAuthAttempt,
-                    Now < (calendar:datetime_to_gregorian_seconds({ { Yr, Mn, Dy }, { Hr, Min, round(Sec) } }) + 5)
-            end,
-            if
-                not AuthLimitMet ->
-                    case verify_password(Conn, UserID, Password, SecSalt) of 
-                        true ->
-                            insert_auth_attempt(Conn, UserID, true),
-                            create_token(Conn, UserID, HMACKey);
-                        false ->
-                            insert_auth_attempt(Conn, UserID, false),
-                            { error, io_lib:format("Invalid password for user \"~s\"~n", [Username]) }
-                    end;
-                true -> { error, "Too many authentication attempts, try again later" }
-            end
-    end.
+update_credentials({ Username, Password, NewPassword }) ->
+    call({ update_credentials, Username, Password, NewPassword }).
 
-verify({ Token }) when is_binary(Token) ->
-    gen_server:call(?MODULE, { users_verify_token, Token }).
-
-verify({ Token }, #{ hmac_key := HMACKey }) ->
-    Conn = db:connect(),
-    case verify_token(HMACKey, Token) of
-        TokenInfo when is_map(TokenInfo) ->
-            % If the token expires within the next hour, refresh it
-            #{ user_id := UserID, exp := ExpTime } = TokenInfo,
-            Now = calendar:datetime_to_gregorian_seconds(calendar:universal_time()),
-            if
-                Now > (ExpTime - (60 * 60)) andalso Now < ExpTime ->
-                    FreshToken = create_token(Conn, UserID, HMACKey),
-                    { verify_token(HMACKey, FreshToken), FreshToken };
-                true -> { TokenInfo, Token }
-            end;
-        { error, Error } -> { error, Error }
-    end.
-
-token_info({ Token }) when is_binary(Token) ->
-    gen_server:call(?MODULE, { users_token_info, Token }).
-
-token_info({ Token }, _State) -> get_token_info(Token).
-
-get_user_id(Conn, Username) ->
-    case epgsql:equery(Conn, "select id from users where username = $1", [Username]) of
-        { ok, _Columns, Rows } -> case length(Rows) of
-            0 -> null;
-            1 -> element(1, hd(Rows))
-        end;
-        _ -> null
-    end.
-
-insert_user(Conn, Username) ->
-    Result = epgsql:equery(
-        Conn,
-        "insert into users (username, created) values ($1, $2) returning (id)",
-        [Username, calendar:universal_time()]
-    ),
-    case Result of
-        { ok, _Count, _Columns, Rows } ->  element(1, hd(Rows));
-        { error, Error } -> { error, Error }
-    end.
-
-insert_password(Conn, UserID, Password, SecSalt) ->
-    Salt = crypto:strong_rand_bytes(64),
-    Hash = crypto:hash(sha3_512, <<Salt/binary, SecSalt/binary, Password/binary>>),
-    Result = epgsql:equery(
-        Conn, 
-        "insert into passwords (user_id, salt, hash) values ($1, $2, $3)",
-        [UserID, base64:encode(Salt), base64:encode(Hash)]
-    ),
-    case Result of 
-        { ok, _Count } -> ok;
-        { error, Error } -> { error, Error }
-    end.
-
-insert_auth_attempt(Conn, UserID, Successful) when is_boolean(Successful) ->
-    Result = epgsql:equery(
-        Conn,
-        "insert into auth_attempts (user_id, successful, at) values ($1, $2, $3)",
-        [UserID, Successful, calendar:universal_time()]
-    ),
-    case Result of
-        { ok, _Count } -> ok;
-        { error, Error } -> { error, Error }
-    end.
-
-get_last_auth_attempt(Conn, UserID) ->
-    case epgsql:equery(Conn, "select max(at) from auth_attempts where user_id = $1", [UserID]) of
-        { ok, _Columns, Rows } -> case length(Rows) of
-            1 -> element(1, hd(Rows));
-            _ -> null
-        end;
-        _ -> null
-    end.
-
-insert_password_change(Conn, UserID) ->
-    case epgsql:equery(
-        Conn,
-        "insert into password_changes (user_id, at) values ($1, $2)",
-        [UserID, calendar:universal_time()]
-    ) of
-        { ok, _Count } -> ok;
-        { error, Error } -> { error, Error }
-    end.
-
-verify_password(Conn, UserID, Password, SecSalt) ->
-    case epgsql:equery(Conn, "select salt, hash from passwords where user_id = $1", [UserID]) of
-        { ok, _Columns, Rows } -> if
-            length(Rows) == 1 ->
-                { Salt, TargetHash } = hd(Rows),
-                Hash = base64:encode(
-                    crypto:hash(sha3_512, <<(base64:decode(Salt))/binary, SecSalt/binary, Password/binary>>)
-                ),
-                Hash == TargetHash;
-            true -> false
-        end;
-        _ -> false
-    end.
-
-create_token(Conn, UserID, HMACKey) ->
-    case epgsql:equery(Conn, "select username from users where id = $1", [UserID]) of
-        { ok, _Columns, Rows } -> if
-            length(Rows) == 1 ->
-                { Username } = hd(Rows),
-                Now = calendar:datetime_to_gregorian_seconds(calendar:universal_time()),
-                ExpTime = Now + (60 * 60 * 24), % Expire in one day
-                Body = jsone:encode(#{
-                    <<"user_id">> => UserID,
-                    <<"username">> => Username,
-                    <<"exp">> => ExpTime
-                }),
-                Signature = crypto:mac(hmac, sha3_512, HMACKey, Body),
-                <<(base64:encode(Body))/binary, <<".">>/binary, (base64:encode(Signature))/binary>>;
-            true -> { error, "Could not create auth token" }
-        end;
-        _ -> { error, "Failed to retrieve user information" }
-    end.
-
-verify_token(HMACKey, Token) ->
-    [BodyStr, TokenSignatureStr] = string:split(unicode:characters_to_list(Token), "."),
-    BodyJSON = base64:decode(BodyStr),
-    TokenSignatureBin = base64:decode(TokenSignatureStr),
-    ComputedSignature = crypto:mac(hmac, sha3_512, HMACKey, BodyJSON),
-    if
-        ComputedSignature == TokenSignatureBin ->
-            Body = jsone:decode(BodyJSON),
-            #{ <<"exp">> := ExpTime } = Body,
-            Now = calendar:datetime_to_gregorian_seconds(calendar:universal_time()),
-            if
-                Now >= ExpTime -> { error, "Token expired" };
-                true -> #{ <<"user_id">> := UserID, <<"username">> := Username } = Body,
-                    #{ user_id => UserID, username => Username, exp => ExpTime }
-            end;
-        true -> { error, "Invalid signature" }
-    end.
-
-get_token_info(null) -> null;
-get_token_info(AuthToken) ->
-    Body = jsone:decode(base64:decode(hd(string:split(unicode:characters_to_list(AuthToken), ".")))),
-    #{ <<"user_id">> := UserID, <<"username">> := Username, <<"exp">> := ExpTime } = Body,
-    #{ user_id => UserID, username => Username, exp => calendar:gregorian_seconds_to_datetime(ExpTime) }.
-
-valid_username(Username) ->
-    case unicode:characters_to_list(Username) of
-        UnicodeUsername when is_list(UnicodeUsername) -> if
-            length(UnicodeUsername) < 3 -> { error, "Username must be at least 3 characters long" };
-            length(UnicodeUsername) > 64 -> { error, "Username must be no longer than 64 characters" };
-            true -> true
-        end;
-        _ -> { error, "Username must be a valid unicode string" }
-    end.
-
-valid_password(Password) ->
-    case unicode:characters_to_list(Password) of
-        UnicodePassword when is_list(UnicodePassword) -> if
-            length(UnicodePassword) < 8 -> { error, "Password must be at least 8 characters long" };
-            length(UnicodePassword) > 64 -> { error, "Password must be no longer than 64 characters" };
-            true -> true
-        end;
-        _ -> { error, "Password must be a valid unicode string" }
-    end.
+round_datetime({ { Yr, Mon, Day }, { Hr, Min, Sec } }) ->
+    { { Yr, Mon, Day }, { Hr, Min, round(Sec)} }.

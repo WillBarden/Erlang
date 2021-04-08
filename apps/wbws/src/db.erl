@@ -1,23 +1,31 @@
 -module(db).
--behaviour(supervisor).
+-behaviour(gen_server).
 
--export([init/1, start_link/0]).
+-export([init/1, start_link/1, handle_call/3, handle_cast/2]).
 -export([connect/0, equery/2, equery/3, squery/1, squery/2, transact/1]).
 
-init([]) ->
-    SupFlags = #{
-        strategy => one_for_one,
-        intensity => 5,
-        period => 10
-    },
-    ChildSpecs = [
-        poolboy:child_spec(
-            ?MODULE, [{ name, { local, ?MODULE } }, { worker_module, db_w }, { size, 8 }, { max_overflow, 64 }]
-        )
-    ],
-    { ok, { SupFlags, ChildSpecs } }.
+init(_Args) ->
+    Conn = case connect() of { error, _Error } -> null; { ok, C } -> C end,
+    { ok, #{ db_conn => Conn } }.
 
-start_link() -> supervisor:start_link(?MODULE, []).
+start_link(Args) ->
+    gen_server:start_link(?MODULE, Args, []).
+
+handle_call({ squery, Query }, _From, #{ db_conn := Conn } = _State) ->
+    { reply, epgsql:squery(Conn, Query), _State };
+handle_call({ squery, Conn, Query }, _From, _State) ->
+    { reply, epgsql:squery(Conn, Query), _State };
+handle_call({ equery, Query, Params }, _From, #{ db_conn := Conn } = _State) ->
+    { reply, epgsql:equery(Conn, Query, Params), _State };
+handle_call({ equery, Conn, Query, Params }, _From, _State) ->
+    { reply, epgsql:equery(Conn, Query, Params), _State };
+handle_call({ transaction, Fn }, _From, #{ db_conn := Conn } = _State) ->
+    { reply, epgsql:with_transaction(Conn, Fn, []), _State };
+handle_call({ transaction, Conn, Fn }, _From, _State) ->
+    { reply, epgsql:with_transaction(Conn, Fn, []), _State };
+handle_call(_Request, _From, _State) -> { reply, _Request, _State }.
+
+handle_cast(_Request, _State) -> { noreply, _State }.
 
 connect() -> 
     Host = string:trim(os:getenv("DB_HOST", "localhost")),
@@ -30,33 +38,23 @@ connect() ->
     Password = string:trim(os:getenv("DB_PASSWORD", "password")),
     Database = string:trim(os:getenv("DB_DATABASE", "database")),
     Timeout = list_to_integer(string:trim(os:getenv("DB_TIMEOUT", "3000"))),
-    case epgsql:connect(#{
+    epgsql:connect(#{
         host => Host, port => Port, ssl => UseSSL, username => Username, password => Password, database => Database,
         timeout => Timeout
-    }) of
-        {ok, Conn} -> Conn;
-        Other -> Other
-    end.
+    }).
 
+call(Request) -> poolboy:transaction(db_worker_pool, fun(Worker) -> gen_server:call(Worker, Request) end).
 
-equery(Conn, Query, Params) -> epgsql:equery(Conn, Query, Params).
+cast(Request) -> poolboy:transaction(db_worker_pool, fun(Worker) -> gen_server:cast(Worker, Request) end).
 
-equery(Query, Params) ->
-    poolboy:transaction(
-        ?MODULE,
-        fun(Worker) -> gen_server:call(Worker, { equery, Query, Params }) end
-    ).
+squery(Conn, Query) -> call({ squery, Conn, Query }).
 
-squery(Conn, Query) -> epgsql:squery(Conn, Query).
+squery(Query) -> call({ squery, Query }).
 
-squery(Query) ->
-    poolboy:transaction(
-        ?MODULE, 
-        fun(Worker) -> gen_server:call(Worker, { squery, Query }) end
-    ).
+equery(Conn, Query, Params) -> call({ equery, Conn, Query, Params }).
 
-transact(Fn) ->
-    poolboy:transaction(
-        ?MODULE,
-        fun(Worker) -> gen_server:call(Worker, { transaction, Fn }) end
-    ).
+equery(Query, Params) -> call({ equery, Query, Params }).
+
+transact(Conn, Fn) -> call({ transaction, Conn, Fn }).
+
+transact(Fn) -> call({ transaction, Fn }).

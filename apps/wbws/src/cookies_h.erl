@@ -7,12 +7,14 @@ init(Req, State) ->
     case cowboy_req:method(Req) of
         <<"GET">> ->
             Cookies = cowboy_req:parse_cookies(Req),
-            cowboy_req:reply(200, #{}, jsone:encode(Cookies), Req),
-            { ok, Req, State };
+            req:ok_json(#{}, Cookies, Req);
         <<"POST">> ->
-            { ok, Body, _Other } = cowboy_req:read_urlencoded_body(Req),
-            { _, Value } = lists:keyfind(<<"SET_TEST_COOKIE">>, 1, Body),
-            Req1 = cowboy_req:set_resp_cookie(<<"TEST_COOKIE">>, Value, Req),
-            cowboy_req:reply(200, #{}, jsone:encode(Body), Req1),
-            { ok, Req1, State }
+            { ok, Body, Req1 } = cowboy_req:read_urlencoded_body(Req),
+            Req2 = lists:foldl(
+                fun({ K, V }, FReq) -> req:set_cookie(K, V, FReq) end,
+                Req1,
+                Body    
+            ),
+            Cookies = cowboy_req:parse_cookies(Req),
+            req:ok_json(#{}, Cookies, Req)
     end.

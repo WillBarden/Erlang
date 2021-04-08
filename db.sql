@@ -43,5 +43,6 @@ create table permission_assignments (
     user_id uuid not null,
     permission varchar(64) not null,
     foreign key(user_id) references users(id),
-    foreign key(permission) references permissions(name)
+    foreign key(permission) references permissions(name),
+    check (permission = upper(permission))
 );
