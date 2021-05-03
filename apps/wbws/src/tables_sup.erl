@@ -1,21 +1,19 @@
--module(users_sup).
+-module(tables_sup).
 -behaviour(supervisor).
 
 -export([init/1, start_link/0]).
 
 init([]) ->
-    SecSalt = unicode:characters_to_binary(os:getenv("SEC_SALT")),
     SupFlags = #{
         strategy => one_for_one,
         intensity => 5,
         period => 10
     },
-    WorkerArgs = #{ sec_salt => SecSalt },
     ChildSpecs = [
         poolboy:child_spec(
-            users_worker_pool,
-            [{ name, { local, users_worker_pool } }, { worker_module, users }, { size, 4 }, { max_overflow, 8 }],
-            WorkerArgs
+            tables_pool,
+            [{ name, { local, tables_pool } }, { worker_module, tables }, { size, 8 }, { max_overflow, 32 }],
+            []
         )
     ],
     { ok, { SupFlags, ChildSpecs } }.

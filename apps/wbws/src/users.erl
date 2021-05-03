@@ -2,7 +2,7 @@
 -behaviour(gen_server).
 
 -export([init/1, terminate/2, start_link/1, handle_call/3, handle_cast/2]).
--export([id/1, create/1, authenticate/1, update_credentials/1]).
+-export([id/1, exists/1, create/1, authenticate/1, update_credentials/1]).
 
 
 init(Args) -> { ok, Args }.
@@ -17,6 +17,12 @@ handle_call({ id, Username }, _From, State) ->
         _ -> null
     end,
     { reply, UserID, State };
+handle_call({ exists, UserID }, _From, State) ->
+    UserExists = case db:equery("select count(id) from users where id = $1", [UserID]) of
+        { ok, _Columns, [{ Count }]} -> Count =:= 1;
+        _ -> false
+    end,
+    { reply, UserExists, State };
 handle_call({ create, Username, Password }, _From, #{ sec_salt := SecSalt } = State) ->
     UsernameStr = unicode:characters_to_list(Username),
     PasswordStr = unicode:characters_to_list(Password),
@@ -50,7 +56,7 @@ handle_call({ authenticate, Username, Password }, _From, #{ sec_salt := SecSalt 
         null -> no_user;
         UserID ->
             { ok, _Columns, [{ LastAuthAttempt }] } = db:equery(
-                "select max(at) from auth_attempts where user_id = $1", [UserID]
+                "select max(at) from auth_attempts where user_id = $1 and successful = false", [UserID]
             ),
             AuthLimitMet = case LastAuthAttempt of
                 null -> false;
@@ -112,19 +118,16 @@ handle_call({ update_credentials, Username, Password, NewPassword }, _From, #{ s
                                         sha3_512, <<NewSalt/binary, SecSalt/binary, NewPassword/binary>>
                                     ),
                                     db:transact(fun(Conn) ->
-                                        io:fwrite("Updating credentials, New Salt = ~s, New Hash = ~s ~n", [NewSalt, NewHash]),
                                         db:equery(
                                             Conn,
                                             "update passwords set salt = $1, hash = $2 where user_id = $3",
                                             [base64:encode(NewSalt), base64:encode(NewHash), UserID]
                                         ),
-                                        io:fwrite("Recording password change event~n", []),
                                         db:equery(
                                             Conn,
                                             "insert into password_changes (user_id, at) values ($1, $2)",
                                             [UserID, calendar:universal_time()]
                                         ),
-                                        io:fwrite("Finalizing transaction~n", []),
                                         ok
                                     end)
                             end;
@@ -135,13 +138,15 @@ handle_call({ update_credentials, Username, Password, NewPassword }, _From, #{ s
     { reply, Reply, State };
 handle_call(_Request, _From, State) -> { noreply, State }.
 
-handle_cast(_Request, _State) -> { noreply, _State }.
+handle_cast(_Request, State) -> { noreply, State }.
 
 call(Request) -> poolboy:transaction(users_worker_pool, fun(Worker) -> gen_server:call(Worker, Request) end).
 
 cast(Request) -> poolboy:transaction(users_worker_pool, fun(Worker) -> gen_server:cast(Worker, Request) end).
 
 id(Username) when is_binary(Username) -> call({ id, Username }).
+
+exists(UserID) when is_binary(UserID) -> call({ exists, UserID }).
 
 create({ Username, Password }) -> call({ create, Username, Password }).
 

@@ -4,6 +4,8 @@
 
 -compile(export_all).
 
+init(Req, State) -> { ok, handle(Req), State }.
+
 handle(Req) -> handle(req:method(Req), Req).
 
 handle(<<"GET">>, Req) ->
@@ -19,7 +21,7 @@ handle(<<"GET">>, Req) ->
     end;
 handle(<<"POST">>, Req) ->
     { ok, RequestFields, Req1 } = req:read_urlencoded_body(Req),
-    RequestFieldNames = lists:map(fun(Field) -> element(1, Field) end, RequestFields),
+    RequestFieldNames = lists:map(fun({ Name, _Value }) -> Name end, RequestFields),
     case lists:search(
         fun(FieldName) -> not lists:member(FieldName, RequestFieldNames) end,
         [<<"username">>, <<"password">>]
@@ -51,7 +53,7 @@ handle(<<"POST">>, Req) ->
 handle(<<"PUT">>, Req) ->
     case req:authorize(Req) of
         { authorized, Req1 } ->
-            { UserID, Username, Permissions, ExpTime } = auth_token:decode(req:get_cookie("AUTH_TOKEN", Req1)),
+            { UserID, Username, Permissions, _ExpTime } = auth_token:decode(req:get_cookie("AUTH_TOKEN", Req1)),
             FreshToken = auth_token:sign({ UserID, Username, Permissions }),
             { FreshUserID, FreshUsername, FreshPermissions, FreshExpTime } = auth_token:decode(FreshToken),
             Req2 = req:set_cookie("AUTH_TOKEN", FreshToken, Req1),
@@ -69,5 +71,3 @@ handle(<<"DELETE">>, Req) ->
     Req1 = req:clear_cookie("AUTH_TOKEN", Req),
     req:ok(Req1);
 handle(_, Req) -> req:method_not_allowed(Req).
-
-init(Req, State) -> { ok, handle(Req), State }.

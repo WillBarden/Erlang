@@ -1,12 +1,16 @@
 -module(db).
 -behaviour(gen_server).
 
--export([init/1, start_link/1, handle_call/3, handle_cast/2]).
+-export([init/1, terminate/2, start_link/1, handle_call/3, handle_cast/2]).
 -export([connect/0, equery/2, equery/3, squery/1, squery/2, transact/1]).
 
 init(_Args) ->
     Conn = case connect() of { error, _Error } -> null; { ok, C } -> C end,
     { ok, #{ db_conn => Conn } }.
+
+terminate(_Reason, #{ db_conn := Conn } = _State) ->
+    epgsql:close(Conn),
+    normal.
 
 start_link(Args) ->
     gen_server:start_link(?MODULE, Args, []).

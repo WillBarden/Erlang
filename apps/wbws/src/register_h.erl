@@ -2,20 +2,11 @@
 
 -export([init/2]).
 
-first_missing(Required, Values) ->
-    case lists:search(
-        fun(RequiredValue) -> not lists:member(RequiredValue, Values) end,
-        Required    
-    ) of
-        { value, Value } -> Value;
-        false -> null    
-    end.
-
 handle(Req) -> handle(req:method(Req), Req).
 
 handle(<<"POST">>, Req) ->
     { ok, RequestFields, Req1 } = req:read_urlencoded_body(Req),
-    RequestFieldNames = lists:map(fun(Field) -> element(1, Field) end, RequestFields),
+    RequestFieldNames = lists:map(fun({ Name, _Value }) -> Name end, RequestFields),
     case lists:search(
         fun(FieldName) -> not lists:member(FieldName, RequestFieldNames) end,
         [<<"username">>, <<"password">>]
@@ -34,7 +25,7 @@ handle(<<"PUT">>, Req) ->
     case req:authorize(Req) of
         { authorized, Req1 } ->
             { ok, RequestFields, Req2 } = req:read_urlencoded_body(Req1),
-            RequestFieldNames = lists:map(fun(Field) -> element(1, Field) end, RequestFields),
+            RequestFieldNames = lists:map(fun({ Name, _Value }) -> Name end, RequestFields),
             case lists:search(
                 fun(FieldName) -> not lists:member(FieldName, RequestFieldNames) end,
                 [<<"username">>, <<"password">>, <<"new_password">>]
@@ -55,9 +46,7 @@ handle(<<"PUT">>, Req) ->
                                 invalid_credentials -> req:bad_req_error(#{}, "Invalid credentials", Req2);
                                 { invalid_password, Reason } -> req:bad_req_error(#{}, Reason, Req2);
                                 ok ->
-                                    io:fwrite("Successfully updated credentials~n", []),
                                     Req3 = req:clear_cookie("AUTH_TOKEN", Req2),
-                                    io:fwrite("Clearing cookie~n", []),
                                     req:ok(Req3)
                             end
                     end

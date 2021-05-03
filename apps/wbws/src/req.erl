@@ -6,6 +6,12 @@ read_urlencoded_body(Req) -> cowboy_req:read_urlencoded_body(Req).
 
 method(Req) -> cowboy_req:method(Req).
 
+bindings(Req) -> cowboy_req:bindings(Req).
+
+binding(Name, Req) -> cowboy_req:binding(Name, Req).
+
+binding(Name, Req, Default) -> cowboy_req:binding(Name, Req, Default).
+
 get_cookie(Key, Req) when is_list(Key) ->
     get_cookie(unicode:characters_to_binary(Key), Req);
 get_cookie(Key, Req) ->
@@ -54,7 +60,7 @@ authorize(Req, Permissions) ->
                         case lists:search(
                             fun(P) -> lists:member(P, NormalizedPermissions) end, NormalizedUserPermissions
                         ) of
-                            { value, _Permission } -> { authorized, Req };
+                            { value, _Permission } -> { authorized, Req, AuthInfo };
                             false ->
                                 Req1 = clear_cookie("AUTH_TOKEN", Req),
                                 { unauthorized, Req1 }
@@ -98,7 +104,7 @@ bad_req(Headers, Body, Req) -> reply(400, Headers, Body, Req).
 bad_req_json(Headers, Body, Req) -> reply_json(400, Headers, Body, Req).
 bad_req_error(Headers, Error, Req) -> reply_error(400, Headers, Error, Req).
 
-unauthorized(Req) -> reply_error(401, #{}, "Anauthorized", Req).
+unauthorized(Req) -> reply_error(401, #{}, "Unauthorized", Req).
 forbidden(Req) -> reply_error(403, #{}, "Forbidden", Req).
 not_found(Req) -> reply_error(404, #{}, "Not Found", Req).
 method_not_allowed(Req) -> reply_error(405, #{}, "Method Not Allowed", Req).

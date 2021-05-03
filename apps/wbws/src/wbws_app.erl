@@ -5,6 +5,7 @@
 -export([start/2, stop/1]).
 
 start(_StartType, _StartArgs) ->
+    io:fwrite("Starting server...~n", []),
     Dispatch = cowboy_router:compile([
         {
             '_',
@@ -12,6 +13,8 @@ start(_StartType, _StartArgs) ->
                 { "/", index_h, [] },
                 { "/register", register_h, [] },
                 { "/auth", auth_h, [] },
+                { "/tables/[:id]", tables_h, [] },
+                { "/tables/:id/:ws", tables_h, [] },
                 { "/[...]", cowboy_static, { priv_dir, wbws, "/static" } }
             ]
         }

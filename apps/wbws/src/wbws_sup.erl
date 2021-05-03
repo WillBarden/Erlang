@@ -16,6 +16,9 @@ init([]) ->
     ChildSpecs = [
         #{ id => users_sup, start => { users_sup, start_link, [] } },
         #{ id => db_sup, start => { db_sup, start_link, []} },
-        #{ id => auth_token_sup, start => { auth_token_sup, start_link, [] } }
+        #{ id => auth_token_sup, start => { auth_token_sup, start_link, [] } },
+        #{ id => tables_sup, start => { tables_sup, start_link, [] } },
+
+        #{ id => chat_listener, start => { chat_listener, start_link, [] } }
     ],
     { ok, { SupFlags, ChildSpecs } }.
